@@ -1,0 +1,188 @@
+---
+title: "QMSS G4058 Assignment 3"
+author: "Arnold Lau"
+date: "November 6, 2015"
+output: html_document
+---
+
+### 1. Optimization
+
+```{r}
+training <- readRDS(gzcon(url("https://courseworks.columbia.edu/x/pJdP39")))
+testing <- readRDS(gzcon(url("https://courseworks.columbia.edu/x/QnKLgY")))
+```
+
+Original "best" model from the midterm:
+
+```{r}
+ols <- lm(totalprice ~ area + zone + category + age + floor + rooms + out + conservation + toilets
+                       + garage + elevator + streetcategory + heating + storage, data = training)
+ols_step <- step(ols, trace = 0) # do not print each step
+best_model <- ols_step
+
+summary(best_model)
+```
+
+Function for sum of squared residuals:  
+
+```{r}
+
+train_X <- model.matrix(best_model)
+
+ssr <- function(coef_proposals, observed_X_values, response_values) {
+  # Inputs a matrix of observed values of the predictor variables, a numeric vector of proposed values for
+  # coefficients, and a numeric vector of the actual values of the response variable
+  # Outputs the sum of squared residuals
+  
+  if (length(observed_X_values[1, ]) != length(coef_proposals)) {
+    stop("Vector of proposed values must be of the same length as the number of coefficents in the model, 
+         including the intercept")
+  }
+  predicted_values <- (observed_X_values %*% coef_proposals)
+  return(sum((response_values - predicted_values) ** 2))
+}
+
+# Test the function using the coefficients from the original model
+
+all.equal(sum(best_model$residuals**2), ssr(as.numeric(coef(best_model)), train_X, training$totalprice))
+```
+
+Use the optim() function to find parameters that minimize the sum of squared residuals:
+
+```{r}
+result <- optim(rnorm(40, 0, 1), ssr, observed_X_values = train_X, response_values = training$totalprice, 
+                method = "BFGS")
+result$value                 # returned by general-purpose optim
+sum(best_model$residuals**2) # returned by lm()
+```
+
+### 2. Principal Components Regression
+
+```{r}
+stopifnot(require(pls))
+pcr1 <- pcr(totalprice ~ ., data = training)
+pcr1_pred <- predict(pcr1, newdata = testing)
+
+avg_sq_error <- function(pred_values, actual_values) {
+  return(mean((actual_values - pred_values) ** 2))
+}
+
+# Create a vector of average squared errors for each value of k, k = # of principal components
+pcr1_errors <- apply(pcr1_pred, MARGIN = 3, avg_sq_error, actual_values = testing$totalprice)
+best_pcr_error <- pcr1_errors[which.min(pcr1_errors)]
+
+# Original average squared error from the model used in the midterm:
+y_hat <- predict(ols_step, newdata = testing)
+best_error <- avg_sq_error(y_hat, testing$totalprice)
+
+best_pcr_error
+best_error
+```
+
+Using principal components regression with __k = 44__ yields the best predictive model under the average squared error criterion. This average squared error (819654757) is lower than the average squared error for the model I estimated on the midterm (864167580).
+
+### 3. Data Mining with a Binary Outcome
+
+```{r}
+load("dataset.RData")
+```
+
+Divide the dataset into mutually exclusive training and testing data:  
+```{r}
+set.seed(8641)                               # Make the training/testing split reproducible
+train_test <- rep("train", 6631)
+train_test[sample((1:6631), 1326)] <- "test" # 80/20 split between training and testing data
+dataset <- cbind(dataset, train_test)
+training <- dataset[dataset$train_test == "train", ]
+testing <- dataset[dataset$train_test == "test", ]
+training$train_test <- NULL
+testing$train_test <- NULL
+```
+
+Make a scatterplot of two of the first 18 variables that are both numeric and plausibly relevant to the probability that the borrower will have difficulty repaying the loan on time:  
+
+```{r}
+library(ggplot2)
+
+# Plot loan amount and 
+qplot(loan_amnt, revol_bal, data = training, col = home_ownership, pch = as.factor(y))
+```
+
+Initial logit model:
+
+```{r}
+logit <- glm(y ~ loan_amnt + revol_bal + home_ownership, data = training, family = binomial)
+y_hat_logit <- predict(logit, newdata = testing, type = "response")
+classified_logit <- as.integer(y_hat_logit > 0.5)
+table(testing$y, classified_logit) # Classifies 1119/1326 observations correctly
+```
+
+This model is completely useless - it's effectively the same as just assuming nobody defaults.  
+
+```{r}
+logit2 <- glm(y ~ loan_amnt + term + int_rate + installment + home_ownership + annual_inc + 
+                  purpose + delinq_2yrs + inq_last_6mths + open_acc + pub_rec + revol_bal, 
+              data = training, family = binomial)
+y_hat_logit2 <- predict(logit2, newdata = testing, type = "response")
+classified_logit2 <- as.integer(y_hat_logit2 > 0.5)
+table(testing$y, classified_logit2) # Classifes 1117/1326 observations correctly
+
+logit3 <- glm(y ~ loan_amnt + term + int_rate + installment + 
+                  delinq_2yrs + inq_last_6mths + open_acc + revol_bal, 
+              data = training, family = binomial)
+y_hat_logit3 <- predict(logit3, newdata = testing, type = "response")
+classified_logit3 <- as.integer(y_hat_logit3 > 0.5)
+table(testing$y, classified_logit3) # Classifes 1118/1326 observations correctly
+
+logit4 <- glm(y ~ loan_amnt + int_rate + inq_last_6mths, data = training, family = binomial)
+y_hat_logit4 <- predict(logit4, newdata = testing, type = "response")
+classified_logit4 <- as.integer(y_hat_logit4 > 0.5)
+table(testing$y, classified_logit4) # Classifes 1118/1326 observations correctly
+
+logit5 <- glm(y ~ loan_amnt + term + int_rate + installment + unemployed + 
+                  home_ownership + annual_inc + verification_status + purpose +
+                  delinq_2yrs + earliest_cr_line + inq_last_6mths + open_acc +
+                  pub_rec + revol_bal + total_acc, data = training, family = binomial)
+y_hat_logit5 <- predict(logit5, newdata = testing, type = "response")
+classified_logit5 <- as.integer(y_hat_logit5 > 0.5)
+table(testing$y, classified_logit5)
+
+
+
+library(MASS)
+QDA4 <- qda(y ~ loan_amnt + int_rate + inq_last_6mths, data = training)
+y_hat_QDA4 <- predict(QDA4, newdata = testing)
+table(testing$y, y_hat_QDA4$class) # Classifies 1117/1326 observations correctly
+
+logit5 <- glm(y ~ term, data = training, family = binomial)
+y_hat_logit5 <- predict(logit5, newdata = testing, type = "response")
+classified_logit5 <- as.integer(y_hat_logit5 > 0.5)
+table(testing$y, classified_logit5) # Classifies 1119/1326 observations correctly
+
+LDA <- lda(y ~ loan_amnt + term + int_rate + installment + home_ownership + annual_inc + 
+               delinq_2yrs + inq_last_6mths + open_acc + revol_bal, data = training)
+y_hat_LDA <- predict(LDA, newdata = testing)
+table(testing$y, y_hat_LDA$class) # Classifies 1118/1326 observations correctly
+
+LDA2 <- lda(y ~ term + int_rate + installment +
+               delinq_2yrs + inq_last_6mths + open_acc + revol_bal, data = training)
+y_hat_LDA2 <- predict(LDA2, newdata = testing)
+table(testing$y, y_hat_LDA2$class) # Classifies 1119/1326 observations correctly
+
+LM <- lm(y ~ inq_last_6mths, data = training)
+y_hat_LM <- predict(LM, newdata = testing)
+classified_LM <- as.integer(y_hat_LM > 0.5)
+table(testing$y, classified_LM)
+
+
+X <- model.matrix(logit2)
+y_training <- model.response(model.frame(y ~ loan_amnt + term + int_rate + installment + home_ownership + annual_inc + 
+                  purpose + delinq_2yrs + inq_last_6mths + open_acc + pub_rec + revol_bal, data = training))
+path2 <- glmnet(X[,-1], y, family = "binomial")
+Xt <- model.matrix(y ~ loan_amnt + term + int_rate + installment + home_ownership + annual_inc + 
+                  purpose + delinq_2yrs + inq_last_6mths + open_acc + pub_rec + revol_bal, data = testing)
+y_hat_path2 <- predict(path2, newx = Xt[,-1], type = "response")
+z_path2 <- y_hat_path2 > 0.5
+s <- which.max(colSums(apply(z_path2, MARGIN = 2, FUN = `==`, e2 = testing$y)))
+table(testing$y, as.integer(z_path2[,s]))
+```
