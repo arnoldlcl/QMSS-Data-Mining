@@ -118,3 +118,14 @@ table(testing$y, classified_logit) # Classifies 1119/1326 observations correctly
 ```
 
 This model is completely useless - it's effectively the same as just assuming nobody defaults.  
+
+```{r}
+fit <- penalized(y, ~ loan_amnt + term + int_rate + installment + annual_inc +
+                      verification_status + purpose + delinq_2yrs + earliest_cr_line + inq_last_6mths +
+                      open_acc + pub_rec + revol_bal + total_acc, 
+                data = training, lambda1 = 1, model = "logistic", standardize = TRUE)
+pred <- predict(fit,  ~ loan_amnt + term + int_rate + installment + annual_inc +
+                      verification_status + purpose + delinq_2yrs + earliest_cr_line + inq_last_6mths +
+                      open_acc + pub_rec + revol_bal + total_acc, data = testing)
+cl_fit <- as.integer(pred > 0.5)
+table(testing$y, cl_fit)
