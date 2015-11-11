@@ -137,7 +137,7 @@ testing$unemployed <- NA
 testing$unemployed[is.na(testing$emp_length)] <- 1
 testing$unemployed[!is.na(testing$emp_length)] <- 0
 
-logit3 <- glm(as.factor(y) ~ loan_amnt + revol_bal + unemployed + inq_last_6mths + small_business, data = training, family = binomial)
+logit3 <- glm(as.factor(y) ~ loan_amnt + revol_bal + unemployed + inq_last_6mths + small_business + delinq_2yrs, data = training, family = binomial)
 y_hat_logit3 <- predict(logit3, newdata = testing, type = "response")
 cl_logit3 <- as.integer(y_hat_logit3 > 0.5)
 table(testing$y, cl_logit3) # Classifies 1119/1326 observations correctly
@@ -148,16 +148,16 @@ This model also is pretty much just the same as assuming nobody defaults.
 ```{r}
 library(glmpath)
 X <- model.matrix(logit3)
-X_test <- model.matrix(y ~ loan_amnt + revol_bal + unemployed + inq_last_6mths + small_business, data = testing)
+X_test <- model.matrix(y ~ loan_amnt + revol_bal + unemployed + inq_last_6mths + small_business + delinq_2yrs, data = testing)
 y <- training$y
 path1 <- glmpath(X, y, nopenalty.subset = 1, family = binomial(link = "logit"))
-summary(path1) # Step 9 has the lowest AIC
-y_hat_path1 <- predict(path1, newx = X_test, type = "response", s = 9)
+summary(path1) # Step 11 has the lowest AIC
+y_hat_path1 <- predict(path1, newx = X_test, type = "response", s = 11)
 cl_path1 <- as.integer(y_hat_path1 > 0.5)
 table(testing$y, cl_path1)
 ```
 
-So is this model. I also tested dozens of models with different variables, most of which either performed at baseline or worse than baseline. Random forests didn't get me anywhere either. I'll just take logit3 to be the best model. (Honestly, though, maybe we should have the full Lending Club data instead of just a subset of features...)
+So is this model. I also tested dozens of models with different variables, with LPM, logit, LDA and QDA, most of which either performed at baseline or worse than baseline. Random forests didn't get me anywhere either. I'll just take logit3 to be the best model. (Maybe we should have the full Lending Club data instead of just a subset of features...)
 
 ```{r}
 best_model <- logit3
@@ -170,3 +170,4 @@ try(next_year$unemployed[!is.na(next_year$emp_length)] <- 0)
 try(y_hat_logit3_nxtyr <- predict(logit3, newdata = next_year, type = "response"))
 try(cl_logit3_nxtyr <- as.integer(y_hat_logit3_nxtyr > 0.5))
 try(table(next_year$y, cl_logit3_nxtyr))
+```
