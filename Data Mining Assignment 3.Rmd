@@ -161,6 +161,7 @@ So is this model. I also tested dozens of models with different variables, with 
 
 ```{r}
 best_model <- logit3
+try(load("next_year.RData"))
 try(next_year$small_business <- NA)
 try(next_year$small_business[next_year$purpose == "small business"] <- 1)
 try(next_year$small_business[next_year$purpose != "small business"] <- 0)
