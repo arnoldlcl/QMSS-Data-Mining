@@ -5,16 +5,29 @@ date: "December 20, 2015"
 output: html_document
 ---
 
+####1. Introduction
+
+This project will be using a dataset from Paralyzed Veterans of America (PVA) that was previously used for the 1998 Knowledge Discovery and Data Mining (KDD) Cup. The dataset consists of 191,779 donors who have donated to PVA at least once between June 1995 and June 1996, but who have not donated anything between June 1996 and June 1997. These are referred to as "lapsed" donors, or donors who made their last donation 13 to 24 months ago. These donors were subsequently all solicited for a promotional campaign in June 1997. The variable to be predicted is __TARGET\_B__, which tallies whether or not the donor responded to the June 1997 promotion.  
+
 ```{r}
-train <- read.table("cup98lrn/cup98LRN.txt", header = TRUE, sep = ",", skipNul = TRUE)
+train <- read.table("KDD/cup98lrn/cup98LRN.txt", header = TRUE, sep = ",", skipNul = TRUE)
 dim(train)
-test <- read.table("cup98val/cup98VAL.txt", header = TRUE, sep = ",", skipNul = TRUE)
-test_targets <- read.table("valtargt.txt", header = TRUE, sep = ",", skipNul = TRUE)
+test <- read.table("KDD/cup98val/cup98VAL.txt", header = TRUE, sep = ",", skipNul = TRUE)
+# test_targets contains two response variables: whether or not a donor responded to the campaign, 
+# and how much money they gave if they did. In this project we are only predicting whether or not
+# a donor responded, i.e. classification.
+test_targets <- read.table("KDD/valtargt.txt", header = TRUE, sep = ",", skipNul = TRUE)
 library(dplyr)
-test <- arrange(test, CONTROLN)
+# bind the response variable to the testing data via the unique id CONTROLN
+test <- arrange(test, CONTROLN) 
 test <- cbind(test, test_targets[,2:3])
 rm(test_targets)
 dim(test)
+```
+
+The dataset was previously divided by the contest organizers into a training set with 95,412 observations and a testing set with 96,367 observations. There are a total of 481 features in the dataset, some of which are more relevant than others. For this project we extracted only a selection of variables that we judged would be better predictors of the response variable. We also recoded some of the variables when appropriate. In order to make the recoding less redundant, we combine the training and testing data first and then resplit them after recoding is complete. Descriptions of each variable follow.  
+
+```{r}
 combi <- rbind(train, test)
 sub <- c("PVASTATE", "DOMAIN", "AGE", "HOMEOWNR", "INCOME", "GENDER", "HIT", "MALEMILI",
          "MALEVET", "VIETVETS", "WWIIVETS", "LOCALGOV", "STATEGOV", "FEDGOV", "MAJOR", "WEALTH2", 
@@ -30,7 +43,9 @@ combi_sub$PVASTATE_BIN[combi_sub$PVASTATE == "E" | combi_sub$PVASTATE == "P"] <-
 combi_sub$PVASTATE_BIN[combi_sub$PVASTATE != "E" & combi_sub$PVASTATE != "P"] <- 0
 combi_sub$PVASTATE_BIN <- as.factor(combi_sub$PVASTATE_BIN)
 summary(combi_sub$PVASTATE_BIN)
+```
 
+```{r}
 ### URBANICITY --> urban, city, suburban, town, or rural
 combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "U"] <- "Urban"
 combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "C"] <- "City"
@@ -105,13 +120,16 @@ test_sub <- combi_sub[95413:191779, ]
 
 train_sub$TARGET_B <- as.factor(train_sub$TARGET_B)
 test_sub$TARGET_B <- as.factor(test_sub$TARGET_B)
+```
 
+```{r}
 glm1 <- glm(TARGET_B ~ RFA_3R + RFA_3F + RFA_3A + NUMPRM12 + CARDGIFT + AVGGIFT, data = train_sub, 
             family = "binomial"(link = "logit"))
 glm1_pred <- predict(glm1, newdata = test_sub, type = "response")
 cl_glm1_pred <- as.integer(glm1_pred > 0.5)
 table(test_sub$TARGET_B, cl_glm1_pred)
 
+library(rpart)
 rpart1 <- rpart(TARGET_B ~ RFA_3R + RFA_3F + RFA_3A + NUMPRM12 + CARDGIFT + AVGGIFT + PEPSTRFL + MAJOR,
                 data = train_sub, method = "class", control = rpart.control(cp = 0.0001))
 rpart1_predict <- predict(rpart1, newdata = test_sub, type = "class")
