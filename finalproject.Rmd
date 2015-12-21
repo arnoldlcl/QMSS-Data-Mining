@@ -1,0 +1,118 @@
+---
+title: "G4058 Final Project"
+author: "Fu, Wen & Lau, Arnold"
+date: "December 20, 2015"
+output: html_document
+---
+
+```{r}
+train <- read.table("cup98lrn/cup98LRN.txt", header = TRUE, sep = ",", skipNul = TRUE)
+dim(train)
+test <- read.table("cup98val/cup98VAL.txt", header = TRUE, sep = ",", skipNul = TRUE)
+test_targets <- read.table("valtargt.txt", header = TRUE, sep = ",", skipNul = TRUE)
+library(dplyr)
+test <- arrange(test, CONTROLN)
+test <- cbind(test, test_targets[,2:3])
+rm(test_targets)
+dim(test)
+combi <- rbind(train, test)
+sub <- c("PVASTATE", "DOMAIN", "AGE", "HOMEOWNR", "INCOME", "GENDER", "HIT", "MALEMILI",
+         "MALEVET", "VIETVETS", "WWIIVETS", "LOCALGOV", "STATEGOV", "FEDGOV", "MAJOR", "WEALTH2", 
+         "VETERANS", "PEPSTRFL", "ETH7", "ETH10", "ETH11", "AFC1", "AFC2", "AFC3", "AFC4", "AFC5", "AFC6",
+         "VC1", "VC2", "VC3", "VC4", "NUMPRM12", "CARDGIFT", "TIMELAG", "AVGGIFT", "RFA_2R", "RFA_2F", 
+         "RFA_2A", "RFA_3", "MDMAUD_R", "MDMAUD_F", "MDMAUD_A", "TARGET_B")
+combi_sub <- combi[, sub]
+
+# Recoding and cleaning
+
+### PVASTATE_BIN is 1 if donor lives in a state served by a PVA chapter, 0 otherwise
+combi_sub$PVASTATE_BIN[combi_sub$PVASTATE == "E" | combi_sub$PVASTATE == "P"] <- 1
+combi_sub$PVASTATE_BIN[combi_sub$PVASTATE != "E" & combi_sub$PVASTATE != "P"] <- 0
+combi_sub$PVASTATE_BIN <- as.factor(combi_sub$PVASTATE_BIN)
+summary(combi_sub$PVASTATE_BIN)
+
+### URBANICITY --> urban, city, suburban, town, or rural
+combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "U"] <- "Urban"
+combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "C"] <- "City"
+combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "S"] <- "Suburban"
+combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "T"] <- "Town"
+combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "R"] <- "Rural"
+combi_sub$URBANICITY[combi_sub$DOMAIN == " "] <- "Not mentioned"
+combi_sub$URBANICITY <- as.factor(combi_sub$URBANICITY)
+
+### NBHOOD_SES --> highest, average, or lower. Urban areas included "above average" and "below average"
+### categories, which we combine here into "average".
+
+combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "1"] <- "Highest SES"
+combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "2"] <- "Average SES" 
+combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "3" & 
+                     substr(combi_sub$DOMAIN, 1, 1) == "U"] <- "Average SES"
+combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "3" &
+                     substr(combi_sub$DOMAIN, 1, 1) != "U"] <- "Lowest SES"
+combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "4"] <- "Lowest SES"
+combi_sub$NBHOOD_SES[combi_sub$DOMAIN == " "] <- "Not mentioned"
+
+# HOMEOWNR_BIN is 1 if donor is a known homeowner and 0 if status is unknown or missing
+combi_sub$HOMEOWNR_BIN[combi_sub$HOMEOWNR == "H"] <- 1
+combi_sub$HOMEOWNR_BIN[combi_sub$HOMEOWNR == "U"] <- 0
+combi_sub$HOMEOWNR_BIN[combi_sub$HOMEOWNR == " "] <- 0
+combi_sub$HOMEOWNR_BIN <- as.factor(combi_sub$HOMEOWNR_BIN)
+
+# Cleaning up GENDER
+combi_sub$GENDER[combi_sub$GENDER == "A"] <- " "
+combi_sub$GENDER[combi_sub$GENDER == "C"] <- " "
+combi_sub$GENDER[combi_sub$GENDER == "U"] <- " "
+
+### HIT has suspicious values "240" and "241" that don't look like they belong there
+
+### Rename ETH7, ETH10 and ETH11 for descriptiveness
+combi_sub$JAPANESE <- combi_sub$ETH7
+combi_sub$KOREAN <- combi_sub$ETH10
+combi_sub$VIETNAMESE <- combi_sub$ETH11
+
+### I don't know how AFC2 differs from MALEMILI, how AFC5 differs from MALEVET, or how VC1 differs from VIETVETS
+### or how VC3 differs from WWIIVETS
+
+### Split RFA_3 into R, F, and A. RFA_3 describes promotions given out June 1996 (18 were given out April 1996)
+combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "F"] <- "First time donor"
+combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "I"] <- "Inactive donor"
+combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "N"] <- "New donor" 
+combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "A"] <- "Active donor"
+combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "L"] <- "Lapsing donor"
+combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "S"] <- "Star donor"
+combi_sub$RFA_3R[combi_sub$RFA_3 == " "] <- "Not mailed"
+combi_sub$RFA_3R <- as.factor(combi_sub$RFA_3R)
+
+combi_sub$RFA_3F[substr(combi_sub$RFA_3, 2, 2) == "1"] <- "One gift"
+combi_sub$RFA_3F[substr(combi_sub$RFA_3, 2, 2) == "2"] <- "Two gifts"
+combi_sub$RFA_3F[substr(combi_sub$RFA_3, 2, 2) == "3"] <- "Three gifts"
+combi_sub$RFA_3F[substr(combi_sub$RFA_3, 2, 2) == "4"] <- "Four or more gifts"
+combi_sub$RFA_3F[combi_sub$RFA_3 == " "] <- "Not mailed"
+combi_sub$RFA_3F <- as.factor(combi_sub$RFA_3F)
+
+combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "A"] <- "$0.01 - $1.99"
+combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "B"] <- "$2.00 - $2.99"
+combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "C"] <- "$3.00 - $4.99"
+combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "D"] <- "$5.00 - $9.99"
+combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "E"] <- "$10.00 - $14.99"
+combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "F"] <- "$15.00 - $24.99"
+combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "G"] <- "$25.00 and above"
+combi_sub$RFA_3A[combi_sub$RFA_3 == " "] <- "Not mailed"
+combi_sub$RFA_3A <- as.factor(combi_sub$RFA_3A)
+
+train_sub <- combi_sub[1:95412, ]
+test_sub <- combi_sub[95413:191779, ]
+
+train_sub$TARGET_B <- as.factor(train_sub$TARGET_B)
+test_sub$TARGET_B <- as.factor(test_sub$TARGET_B)
+
+glm1 <- glm(TARGET_B ~ RFA_3R + RFA_3F + RFA_3A + NUMPRM12 + CARDGIFT + AVGGIFT, data = train_sub, 
+            family = "binomial"(link = "logit"))
+glm1_pred <- predict(glm1, newdata = test_sub, type = "response")
+cl_glm1_pred <- as.integer(glm1_pred > 0.5)
+table(test_sub$TARGET_B, cl_glm1_pred)
+
+rpart1 <- rpart(TARGET_B ~ RFA_3R + RFA_3F + RFA_3A + NUMPRM12 + CARDGIFT + AVGGIFT + PEPSTRFL + MAJOR,
+                data = train_sub, method = "class", control = rpart.control(cp = 0.0001))
+rpart1_predict <- predict(rpart1, newdata = test_sub, type = "class")
+```
