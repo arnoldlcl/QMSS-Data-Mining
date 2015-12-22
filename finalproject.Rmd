@@ -5,11 +5,13 @@ date: "December 20, 2015"
 output: html_document
 ---
 
-####1. Introduction
+###1. Introduction
 
 This project will be using a dataset from Paralyzed Veterans of America (PVA) that was previously used for the 1998 Knowledge Discovery and Data Mining (KDD) Cup. The dataset consists of 191,779 donors who have donated to PVA at least once between June 1995 and June 1996, but who have not donated anything between June 1996 and June 1997. These are referred to as "lapsed" donors, or donors who made their last donation 13 to 24 months ago. These donors were subsequently all solicited for a promotional campaign in June 1997. The variable to be predicted is __TARGET\_B__, which tallies whether or not the donor responded to the June 1997 promotion.  
 
-```{r}
+```{r message = FALSE}
+library(dplyr)
+library(lattice)
 train <- read.table("KDD/cup98lrn/cup98LRN.txt", header = TRUE, sep = ",", skipNul = TRUE)
 dim(train)
 test <- read.table("KDD/cup98val/cup98VAL.txt", header = TRUE, sep = ",", skipNul = TRUE)
@@ -17,7 +19,6 @@ test <- read.table("KDD/cup98val/cup98VAL.txt", header = TRUE, sep = ",", skipNu
 # and how much money they gave if they did. In this project we are only predicting whether or not
 # a donor responded, i.e. classification.
 test_targets <- read.table("KDD/valtargt.txt", header = TRUE, sep = ",", skipNul = TRUE)
-library(dplyr)
 # bind the response variable to the testing data via the unique id CONTROLN
 test <- arrange(test, CONTROLN) 
 test <- cbind(test, test_targets[,2:3])
@@ -25,28 +26,32 @@ rm(test_targets)
 dim(test)
 ```
 
+###2. Feature Selection & Description  
 The dataset was previously divided by the contest organizers into a training set with 95,412 observations and a testing set with 96,367 observations. There are a total of 481 features in the dataset, some of which are more relevant than others. For this project we extracted only a selection of variables that we judged would be better predictors of the response variable. We also recoded some of the variables when appropriate. In order to make the recoding less redundant, we combine the training and testing data first and then resplit them after recoding is complete. Descriptions of each variable follow.  
 
 ```{r}
 combi <- rbind(train, test)
-sub <- c("PVASTATE", "DOMAIN", "AGE", "HOMEOWNR", "INCOME", "GENDER", "HIT", "MALEMILI",
-         "MALEVET", "VIETVETS", "WWIIVETS", "LOCALGOV", "STATEGOV", "FEDGOV", "MAJOR", "WEALTH2", 
-         "VETERANS", "PEPSTRFL", "ETH7", "ETH10", "ETH11", "AFC1", "AFC2", "AFC3", "AFC4", "AFC5", "AFC6",
-         "VC1", "VC2", "VC3", "VC4", "NUMPRM12", "CARDGIFT", "TIMELAG", "AVGGIFT", "RFA_2R", "RFA_2F", 
-         "RFA_2A", "RFA_3", "MDMAUD_R", "MDMAUD_F", "MDMAUD_A", "TARGET_B")
+sub <- c("PVASTATE", "DOMAIN", "AGE", "HOMEOWNR", "WEALTH2", "STATE", "GENDER", "HIT", "MALEMILI",
+         "MALEVET", "VIETVETS", "WWIIVETS", "LOCALGOV", "STATEGOV", "FEDGOV", "MAJOR", "VETERANS", 
+         "PEPSTRFL", "ETH7", "ETH10", "ETH11", "AFC1", "AFC2", "AFC3", "AFC4", "AFC5", "AFC6",
+         "VC1", "VC2", "VC3", "VC4", "NUMPRM12", "CARDGIFT", "TIMELAG", "AVGGIFT", "LASTGIFT", "RFA_2R", 
+         "RFA_2F", "RFA_2A", "RFA_3", "MDMAUD_R", "MDMAUD_F", "MDMAUD_A", "TARGET_B")
 combi_sub <- combi[, sub]
+```
 
-# Recoding and cleaning
-
-### PVASTATE_BIN is 1 if donor lives in a state served by a PVA chapter, 0 otherwise
+1. __PVASTATE__ indicates whether the donor lives in a state served by a PVA chapter. This variable distinguishes between PVA chapters and EPVA (Eastern Paralyzed Veterans of America) chapters, a distinction which we do not think is important, so we create a new variable __PVASTATE\_BIN__ which is just 1 if __PVASTATE__ is "E" or "P" and 0 otherwise.  
+```{r}
+summary(train$PVASTATE)
 combi_sub$PVASTATE_BIN[combi_sub$PVASTATE == "E" | combi_sub$PVASTATE == "P"] <- 1
 combi_sub$PVASTATE_BIN[combi_sub$PVASTATE != "E" & combi_sub$PVASTATE != "P"] <- 0
 combi_sub$PVASTATE_BIN <- as.factor(combi_sub$PVASTATE_BIN)
-summary(combi_sub$PVASTATE_BIN)
 ```
 
+2. Each value in __DOMAIN__ is two characters. The first character describes whether the donor's neighborhood is urban, city, suburban, town or rural. The second character classifies the socio-economic status (SES) of the donor's neighborhood as highest, average or lowest. We split __DOMAIN__ into two separate variables __URBANICITY__ and __NBHOOD\_SES__.  City, suburban, town and rural areas all had 3 categories of SES, while urban areas had 4, replacing "average" with "above average" and "below average". In coding __NBHOOD\_SES__ we consider both as just "average". Missing values are given their own category, "not mentioned", in order to accommodate algorithms that won't run with missing values (such as randomForest).   
+
 ```{r}
-### URBANICITY --> urban, city, suburban, town, or rural
+summary(train$DOMAIN)
+
 combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "U"] <- "Urban"
 combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "C"] <- "City"
 combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "S"] <- "Suburban"
@@ -54,9 +59,6 @@ combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "T"] <- "Town"
 combi_sub$URBANICITY[substr(combi_sub$DOMAIN, 1, 1) == "R"] <- "Rural"
 combi_sub$URBANICITY[combi_sub$DOMAIN == " "] <- "Not mentioned"
 combi_sub$URBANICITY <- as.factor(combi_sub$URBANICITY)
-
-### NBHOOD_SES --> highest, average, or lower. Urban areas included "above average" and "below average"
-### categories, which we combine here into "average".
 
 combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "1"] <- "Highest SES"
 combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "2"] <- "Average SES" 
@@ -66,35 +68,111 @@ combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "3" &
                      substr(combi_sub$DOMAIN, 1, 1) != "U"] <- "Lowest SES"
 combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "4"] <- "Lowest SES"
 combi_sub$NBHOOD_SES[combi_sub$DOMAIN == " "] <- "Not mentioned"
+```
 
-# HOMEOWNR_BIN is 1 if donor is a known homeowner and 0 if status is unknown or missing
+3. __AGE__ ranges from 1 to 98, with a median of 62 and 23,665 missing values. Comparing TARGET\_B between those with age values and those without, it doesn't seem like a systematic difference is present, so we can leave __AGE__ as is for now.   
+```{r}
+summary(train$AGE)
+train$AGE_MISSING <- ifelse(is.na(train$AGE), 1, 0)
+prop.table(table(train$AGE_MISSING, train$TARGET_B), margin = 1)
+```
+
+4. __HOMEOWNR__ is "H" if the donor is a known homeowner, "U" if unknown, and then there are 22,228 missing values. We recode this int __HOMEOWNR\_BIN__ which is 1 if the donor is a known homeowner and 0 otherwise.
+
+```{r}
 combi_sub$HOMEOWNR_BIN[combi_sub$HOMEOWNR == "H"] <- 1
 combi_sub$HOMEOWNR_BIN[combi_sub$HOMEOWNR == "U"] <- 0
 combi_sub$HOMEOWNR_BIN[combi_sub$HOMEOWNR == " "] <- 0
 combi_sub$HOMEOWNR_BIN <- as.factor(combi_sub$HOMEOWNR_BIN)
+```
 
-# Cleaning up GENDER
+5. __WEALTH2__ indexes relative wealth within each state, with 0 being the lowest income group and 9 being the highest. We recode this as __WEALTH2\_CAT__, a factor.
+```{r}
+histogram(train$WEALTH2, nint = 10)
+combi_sub$WEALTH2_CAT <- as.factor(combi_sub$WEALTH2)
+```
+
+6. __STATE__ includes all 50 U.S states and the District of Columbia, as well as mail from U.S. armed forces stationed in various parts of the world ("AA", "AE", "AP"), American Samoa, Guam, and the Virgin Islands.  
+```{r}
+summary(train$STATE)
+```
+
+7. __GENDER__ includes "U" for Unknown and "J" for Joint Account, along with "M" for Male and "F" for Female. There are also possible coding errors "A" and "C" in the data, and 2957 missing values coded as " ". We preserve this coding and consider "A", "C", and "U" to be " " as well.
+```{r}
 combi_sub$GENDER[combi_sub$GENDER == "A"] <- " "
 combi_sub$GENDER[combi_sub$GENDER == "C"] <- " "
 combi_sub$GENDER[combi_sub$GENDER == "U"] <- " "
+```
 
-### HIT has suspicious values "240" and "241" that don't look like they belong there
+8. __HIT__ indicates the total number of known times the donor has responded to a mail order offer other than PVA's. For some reason, there are an unusually high number of observations with the value of 240, but there isn't any indication in the data's documentation what significance 240 might have. The next lowest value after 240 is 84.
 
+```{r}
+summary(train$HIT)
+```
+
+9. __MALEMILI__, __MALEVET__, __VIETVETS__ and __WWIIVETS__ are neighborhood-level variables recording % males active in the military, % male veterans, % Vietnam veterans, and % WWII veterans respectively, as reported by a third-party data source. __AFC2__, __AFC5__, __VC1__ and __VC3__ record the same thing as the above variables but come from 1990 census data. The other variables like this are __AFC1__ (% adults in active military service), __AFC3__ (% females in active military service), __AFC4__ (% adult veterans age 16+), __AFC6__ (% female veterans age 16+), __VC2__ (% Korean veterans age 16+), and __VC4__ (% veterans serving after May 1975 only).  
+
+```{r}
+histogram(train$MALEVET)
+```
+
+10. __ETH7__, __ETH10__ and __ETH11__ are neighborhood-level variables recording % Japanese, % Korean and % Vietnamese respectively. We think there's a small possibility that these ecological variables have an impact on the predictor - maybe an inverse relationship of some sort. In any case, tree-based methods will assign very low importance to these variables if they turn out to not be relevant after all. The same logic goes for the "veteran" variables above.  
+
+```{r}
 ### Rename ETH7, ETH10 and ETH11 for descriptiveness
 combi_sub$JAPANESE <- combi_sub$ETH7
 combi_sub$KOREAN <- combi_sub$ETH10
 combi_sub$VIETNAMESE <- combi_sub$ETH11
+```
 
-### I don't know how AFC2 differs from MALEMILI, how AFC5 differs from MALEVET, or how VC1 differs from VIETVETS
-### or how VC3 differs from WWIIVETS
+11. __LOCALGOV__, __STATEGOV__ and __FEDGOV__ are the % employed by local government, state government, and federal government, respectively.  
 
+12. __VETERANS__ indicates whether the individual donor has ever indicated interest in veterans' affairs, as collected by third-party data sources.  
+
+13. __NUMPRM12__ is the number of promotions that a donor received between March 1996 and February 1997. The median is 12 promotions, or around one per month, and most values range from 7 to 15. but the full range of values is from 1 to 78.  
+```{r}
+summary(train$NUMPRM12)
+```
+
+14. __CARDGIFT__ is the number of gifts that a donor has ever made to a promotion over their lifetime. The median is 4 and the mode is 1. The values range from 0 to 41. This does not include unsolicited donations - there are 4,968 donors who have never given solicited donations, but have donated in some other fashion. (As previously stated, everyone in the dataset has donated at least once.)  
+
+```{r}
+summary(train$CARDGIFT)
+```
+
+15. __TIMELAG__ is the number of months between a donor's first and second donation. There are three observations with nonsense values (e.g. 1044 months), which we will treat as missing. Including those three, there are 9976 missing values. The median is 6 months.
+
+```{r}
+summary(train$TIMELAG)
+combi_sub$TIMELAG[combi_sub$TIMELAG > 400] <- NA
+```
+
+16. __AVGGIFT__ is the average dollar amount of all donations from each donor to date. The mean is 13.35 and the median is 11.64, but there are quite a few larger gifts.
+```{r}
+summary(train$AVGGIFT)
+bwplot(train$AVGGIFT)
+```
+
+17. __LASTGIFT__ is the dollar amount of the most recent donation made by a donor. The mean is 17.31 and the median is 15.00.
+
+```{r}
+summary(train$LASTGIFT)
+bwplot(train$LASTGIFT)
+```
+
+18. __RFA\_2R__, __RFA\_2F__, __RFA\_2A__, and __RFA\_3__ are "recency, frequency, amount" variables common in direct marketing. These variables range from __RFA\_2__ to __RFA\_24__ in the data, where each number refers to a particular promotion, in reverse date order (i.e. __RFA\_2__ is the most recent promotion, June 1997, and __RFA\_24__ is the earliest promotion, May-June 1994). Each category in an RFA variable consists of three characters. The first character is the donor's recency status (first-time, active, inactive, etc), the second is how many donations they gave within the last 12 months (or less) that they were active, and the third character categorizes the amount of their most recent gift as of the date of that promotion. Note that since this dataset only gathers people who have not donated anything between June 1996 and June 1997, the recency (R) status of every single person in the dataset for promotion 2 is L (Lapsed):  
+```{r}
+table(train$RFA_2R)
+```
+We can thus look at individual donor history across 23 promotions, looking at changes in their status for example, but for this project we just focus on promotion 2 (June 1997), responses to which are measured by __TARGET\_B__, and promotion 3 (June 1996). The dataset already came with __RFA\_2__ split up into R, F and A; we do the same to __RFA\_3__, creating new variables __RFA\_3R__, __RFA\_3F__, and __RFA\_3A__.    
+```{r}
 ### Split RFA_3 into R, F, and A. RFA_3 describes promotions given out June 1996 (18 were given out April 1996)
 combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "F"] <- "First time donor"
 combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "I"] <- "Inactive donor"
 combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "N"] <- "New donor" 
 combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "A"] <- "Active donor"
 combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "L"] <- "Lapsing donor"
-combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "S"] <- "Star donor"
+combi_sub$RFA_3R[substr(combi_sub$RFA_3, 1, 1) == "S"] <- "Star donor" # gave to three or more promos consecutively
 combi_sub$RFA_3R[combi_sub$RFA_3 == " "] <- "Not mailed"
 combi_sub$RFA_3R <- as.factor(combi_sub$RFA_3R)
 
@@ -114,14 +192,34 @@ combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "F"] <- "$15.00 - $24.99"
 combi_sub$RFA_3A[substr(combi_sub$RFA_3, 3, 3) == "G"] <- "$25.00 and above"
 combi_sub$RFA_3A[combi_sub$RFA_3 == " "] <- "Not mailed"
 combi_sub$RFA_3A <- as.factor(combi_sub$RFA_3A)
-
-train_sub <- combi_sub[1:95412, ]
-test_sub <- combi_sub[95413:191779, ]
-
-train_sub$TARGET_B <- as.factor(train_sub$TARGET_B)
-test_sub$TARGET_B <- as.factor(test_sub$TARGET_B)
 ```
 
+19.  __PEPSTRFL__ indicates PEP Star RFA Status. We're not actually sure what this means, but it seems to indicate a type of priority donor.  
+```{r}
+table(train$PEPSTRFL)
+```
+
+20.  __MAJOR__ indicates whether a donor has ever given a $100+ donation at any point. In the training data, only 294 donors have done so.  
+```{r}
+table(train$MAJOR)
+```
+
+21. __MDMAUD\_R__, __MDMAUD\_F__, and __MDMAUD\_A__ are the recency, frequency, and amount variables for major donors. These are coded differently from the other RFA variables. Recency is coded as C for Current Donor, L for Lapsed, I for Inactive and D for Dormant; frequency is coded as 1 for one gift, 2 for two-four gifts and 5 for five+ gifts; amount is coded as L for "low dollar", C for "core", M for "major" and T for "top".  
+
+```{r}
+table(train$MDMAUD_R)
+table(train$MDMAUD_F)
+table(train$MDMAUD_A)
+```
+
+Finally, we make the response variable a factor and then resplit into training and testing data.
+```{r}
+combi_sub$TARGET_B <- as.factor(combi_sub$TARGET_B)
+train_sub <- combi_sub[1:95412, ]
+test_sub <- combi_sub[95413:191779, ]
+```
+
+###3. Modelling & Prediction
 ```{r}
 glm1 <- glm(TARGET_B ~ RFA_3R + RFA_3F + RFA_3A + NUMPRM12 + CARDGIFT + AVGGIFT, data = train_sub, 
             family = "binomial"(link = "logit"))
