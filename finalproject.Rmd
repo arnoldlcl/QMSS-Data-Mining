@@ -231,7 +231,7 @@ test_sub <- combi_sub[10001:20000, ]
 
 ###3. Modelling & Prediction
 
-##Bayesian Additive Regression Trees using bartMachine  
+####Bayesian Additive Regression Trees using bartMachine  
 
 We pass a model predicting __TARGET\_B__ from variables selected to avoid redundancy (e.g. we didn't use all the neighborhood-level variables). We also set use\_missing\_data = TRUE and use_missing_data_dummies_as_covars = TRUE in order to take into account Kapelner and Bleich (2013)'s method for using missing data without imputation.  
 ```{r}
