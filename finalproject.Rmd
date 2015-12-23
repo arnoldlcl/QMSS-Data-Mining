@@ -277,7 +277,7 @@ train_sub_var <- train_sub[, var]
 test_sub_var <- test_sub[, var]
 ```
 
-Several of our selected features in the training set contain missing data. bartMachine had built-in methods for dealing with missing data, but other models don't. Using the `mice` package, the number of the missing values can be counted and visualized as follows.
+Several of our selected features in the training set contain missing data. We think that while we could simply disregard missing values or omit the corresponding predictors, we could benefit from the available information by inferring the missing data from known values. bartMachine has built-in methods for dealing with missing data, but the other models we're going to look at don't.
 
 ```{r}
 stopifnot(require(mice))
@@ -345,6 +345,7 @@ confusionMatrix(mlp_test_target, encodeClassLabels(mlp_pred, method = "WTA"))
 The model fits the training data better than baseline (predicting nobody donates), but it performs either at baseline or worse than baseline, depending on the classification method. encodeClassLabels() converts continuous outputs from mlp to binary outputs for classification, and provides two ways of doing so. Using method "402040" gives us baseline predictions while method "WTA" does slightly worse than baseline.
 
 ####Logistic Regression  
+
 ```{r warning = FALSE}
 glm_fit <- glm(TARGET_B ~ ., data = train_com, family = "binomial"(link = "logit"))
 glm_pred <- predict(glm_fit, newdata = test_com, type = "response")
@@ -352,11 +353,22 @@ table(test_com$TARGET_B, as.integer(glm_pred > 0.5))
 table(test_com$TARGET_B, as.integer(glm_pred > 0.2))
 ```
 
-Fitting logistic regression on the imputed training data using a classification threshold of 0.5 performs at baseline. Lowering the classification threshold to 0.2 gives worse results, but produces 6 true positives.  
+Fitting logistic regression on the imputed training data using a classification threshold of 0.5 performs at baseline. Lowering the classification threshold to 0.2 gives worse results, but produces some true positives.
+
+We update the list of predictors to include only the ones shown by bartMachine to be the most "important".
+
+```{r warning = FALSE}
+glm_new_fit <- glm(TARGET_B ~ LASTGIFT + AVGGIFT + CARDGIFT + NUMPRM12, data = train_com, family = "binomial"(link = "logit"))
+glm_new_pred <- predict(glm_new_fit, newdata = test_com, type = "response")
+table(test_com$TARGET_B, as.integer(glm_new_pred > 0.5))
+table(test_com$TARGET_B, as.integer(glm_new_pred > 0.2))
+```
+
+Still, the logistic model with fewer predictors does worse than before excluding the other predictors.
 
 ####Random Forest
 
-Another example of ensemble learning using trees, like BART above. The default arguments (500 trees, etc.) are used.   
+Next we fit a randomForest model, using the following predictors (same as the first `glm` model).
 
 ```{r}
 stopifnot(require(randomForest))
@@ -364,8 +376,44 @@ rf_fit <- randomForest(TARGET_B ~ ., data = train_com, importance = TRUE)
 rf_pred <- predict(rf_fit, newdata = test_com, type = "response")
 rf_fit
 table(test_com$TARGET_B, rf_pred)
+```
+
+The confusion matrix in the model call suggests that the fit for the training set predicts that 0 people donate. The model on the testing set also predicts that 0 people donate. 
+
+```{r}
 par(mar = c(2,2,2,2))
 varImpPlot(rf_fit)
 ```
 
-Similarly to BART, both the training and testing data are akin to predicting that nobody donates.
+Based on the "importance" scores of existing predictors, we update the list of predictors to include only the most important ones.
+
+```{r}
+rf_new_fit <- randomForest(TARGET_B ~ AVGGIFT + CARDGIFT + LASTGIFT + NUMPRM12, data = train_com, importance = TRUE)
+rf_new_fit
+rf_new_pred <- predict(rf_new_fit, newdata = test_com, type = "response")
+table(test_com$TARGET_B, rf_new_pred)
+```
+
+Now the model correctly classifies 3 donors, although it also has 16 false positives.
+
+##glmnet
+
+We apply `glmnet` to classify donors with sum of log-likelihood as objective function. We build on the logistic model run earlier.
+
+```{r}
+stopifnot(require(glmnet))
+X <- model.matrix(glm_fit)
+y <- train_com$TARGET_B
+path <- glmnet(X[, -1], y, family = "binomial")
+test_X <- model.matrix(TARGET_B ~ ., data = test_com)
+path_pred <- predict(path, newx = test_X[, -1], type = "response")
+z_path_pred <- path_pred > 0.5
+class <- which.max(colSums(apply(z_path_pred, MARGIN = 2, FUN = "==", e2 = y)))
+table(test_com$TARGET_B, as.integer(z_path_pred[, class]))
+```
+
+This model still underperforms the baseline prediction.
+
+###4. Conclusion
+
+Given the low proportion of donors in both the training and testing sets, it was difficult to develop a model that predicts better than baseline. The small variation in the response variable, as well as the great amount of missing data, both affect the performance of our classification models. The most viable point of improvement would be in feature selection.  
