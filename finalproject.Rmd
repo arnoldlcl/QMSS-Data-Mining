@@ -398,11 +398,11 @@ Now the model correctly classifies 3 donors, although it also has 16 false posit
 
 ##glmnet
 
-We apply `glmnet` to classify donors with sum of log-likelihood as objective function. We build on the logistic model run earlier.
+We apply `glmnet` to classify donors via penalized maximum likelihood as objective function.
 
 ```{r}
 stopifnot(require(glmnet))
-X <- model.matrix(glm_fit)
+X <- model.matrix(TARGET_B ~ ., data = train_com)
 y <- train_com$TARGET_B
 path <- glmnet(X[, -1], y, family = "binomial")
 test_X <- model.matrix(TARGET_B ~ ., data = test_com)
