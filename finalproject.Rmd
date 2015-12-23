@@ -77,6 +77,7 @@ combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "3" &
                      substr(combi_sub$DOMAIN, 1, 1) != "U"] <- "Lowest SES"
 combi_sub$NBHOOD_SES[substr(combi_sub$DOMAIN, 2, 2) == "4"] <- "Lowest SES"
 combi_sub$NBHOOD_SES[combi_sub$DOMAIN == " "] <- "Not mentioned"
+combi_sub$NBHOOD_SES <- as.factor(combi_sub$NBHOOD_SES)
 ```
 
 * __AGE__ ranges from 1 to 98, with a median of 62 and 2,465 missing values. Comparing TARGET\_B between those with age values and those without, it doesn't seem like a systematic difference is present, so we can leave __AGE__ as is for now.   
@@ -267,3 +268,104 @@ investigate_var_importance(bart_fit, num_var_plot = 20) # display only 20 variab
 ```
 
 According to the variable inclusion proportions plot of the fitted BART model, the most "important" variables in fitting the model were the frequency of gifts for the June 1997 promo period, the number of promotions received in the last 12 months, and the average dollar amount of all donations from each donor to date. Some state-level and neighborhood-level variables were important as well. 
+
+####More pre-processing: Missing Data Imputation
+
+```{r}
+var <- c("PVASTATE_BIN", "URBANICITY", "NBHOOD_SES", "AGE", "HOMEOWNR_BIN", "WEALTH2_CAT", "GENDER", "HIT", "MAJOR", "VETERANS", "PEPSTRFL", "VIETNAMESE", "JAPANESE", "KOREAN", "AFC1", "AFC4", "NUMPRM12", "CARDGIFT", "TIMELAG", "AVGGIFT", "LASTGIFT", "RFA_2F", "RFA_2A", "RFA_3A", "RFA_3F", "RFA_3R", "MDMAUD_R", "MDMAUD_F", "MDMAUD_A", "TARGET_B")
+train_sub_var <- train_sub[, var]
+test_sub_var <- test_sub[, var]
+```
+
+Several of our selected features in the training set contain missing data. bartMachine had built-in methods for dealing with missing data, but other models don't. Using the `mice` package, the number of the missing values can be counted and visualized as follows.
+
+```{r}
+stopifnot(require(mice))
+md.pattern(train_sub_var)
+```
+
+There are 4,389 (out of 10,000) rows in the training set that are complete. The variables with missing data are: `TIMELAG`, `AGE`, and `WEALTH2_CAT`. Most missing values occur in `WEALTH2_CAT` (4,616).    
+
+We decide to create multivariate imputation by chained equations. The algorithm imputes an incomplete column by generating synthetic values given other columns in the dataset.  
+```{r}
+train_imp <- mice(train_sub_var, m = 5, maxit = 5)
+```
+
+To check whether the imputed data is plausible, we inspect some of the imputations for `AGE`, for example.
+
+```{r}
+train_imp$imp$AGE[1:50, ]
+```
+
+The observed and imputed data can be combined.
+
+```{r}
+train_com <- complete(train_imp)
+dim(train_com)
+```
+
+Further, we check the distributions of the observed and imputed data for `TIMELAG`, for example. We think that the graph indicates that the distributions of blue (observed values) and red (imputed values) are similar.
+
+```{r}
+com <- complete(train_imp, "long", include = TRUE)
+col <- rep(c("blue", "red")[1 + as.numeric(is.na(train_imp$data$TIMELAG))], 6)  # Separates the observed (blue) and imputed (red) data 
+stripplot(TIMELAG ~.imp, data = com, jit = TRUE, fac = 0.8, col = col, pch = 20, cex = 1.4, xlab = "Imputation")
+```
+
+We impute the test data in a similar manner, assuming that they are drawn from the same distribution.  
+
+```{r}
+test_imp <- mice(test_sub_var, m = 5, maxit = 5)
+test_com <- complete(test_imp)
+dim(test_com)
+```
+####Multilayer Perceptrons
+
+With the imputed data, we use a multilayer perceptron (a type of neural net) passing in the same predictors as before, except for STATE (because of the absence of data for one state in the testing set). The input data is transformed into a matrix and then normalized. The default arguments are used for the fit.
+```{r warning = FALSE}
+library(RSNNS)
+combi_com <- rbind(train_com, test_com)
+combi_com_mat <- model.matrix(TARGET_B ~ ., data = combi_com)[, -1]
+# Normalization: set continuous variables to mean 0 and sd 1
+combi_com_mat[, c(10, 27, 31:40)] <- normalizeData(combi_com_mat[, c(10, 27, 31:40)])
+train_com_mat <- combi_com_mat[1:10000, ]
+test_com_mat <- combi_com_mat[10001:20000, ]
+mlp_train_target <- decodeClassLabels(train_com$TARGET_B)
+mlp_test_target <- decodeClassLabels(test_com$TARGET_B)
+mlp_fit <- mlp(x = train_com_mat, y = mlp_train_target, size = c(5), maxit = 100,
+               learnFunc = "Std_Backpropagation", inputsTest = test_com_mat, 
+               targetsTest = mlp_test_target)
+mlp_pred <- predict(mlp_fit, test_com_mat)
+
+confusionMatrix(mlp_train_target, fitted.values(mlp_fit))
+confusionMatrix(mlp_test_target, encodeClassLabels(mlp_pred, method = "402040"))
+confusionMatrix(mlp_test_target, encodeClassLabels(mlp_pred, method = "WTA"))
+```
+
+The model fits the training data better than baseline (predicting nobody donates), but it performs either at baseline or worse than baseline, depending on the classification method. encodeClassLabels() converts continuous outputs from mlp to binary outputs for classification, and provides two ways of doing so. Using method "402040" gives us baseline predictions while method "WTA" does slightly worse than baseline.
+
+####Logistic Regression  
+```{r warning = FALSE}
+glm_fit <- glm(TARGET_B ~ ., data = train_com, family = "binomial"(link = "logit"))
+glm_pred <- predict(glm_fit, newdata = test_com, type = "response")
+table(test_com$TARGET_B, as.integer(glm_pred > 0.5))
+table(test_com$TARGET_B, as.integer(glm_pred > 0.2))
+```
+
+Fitting logistic regression on the imputed training data using a classification threshold of 0.5 performs at baseline. Lowering the classification threshold to 0.2 gives worse results, but produces 6 true positives.  
+
+####Random Forest
+
+Another example of ensemble learning using trees, like BART above. The default arguments (500 trees, etc.) are used.   
+
+```{r}
+stopifnot(require(randomForest))
+rf_fit <- randomForest(TARGET_B ~ ., data = train_com, importance = TRUE)
+rf_pred <- predict(rf_fit, newdata = test_com, type = "response")
+rf_fit
+table(test_com$TARGET_B, rf_pred)
+par(mar = c(2,2,2,2))
+varImpPlot(rf_fit)
+```
+
+Similarly to BART, both the training and testing data are akin to predicting that nobody donates.
